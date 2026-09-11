@@ -1,0 +1,3 @@
+# AstroMeteo
+
+Inicializando el proyecto…
