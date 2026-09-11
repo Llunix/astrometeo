@@ -153,13 +153,17 @@ function LocationPicker({query,setQuery,results,searching,onChoose,onGps,onClose
 function NightButton({night,hours,active,onClick}:{night:NightForecast,hours:HourWeather[],active:boolean,onClick:()=>void}) {
   const best = hours.reduce((value,h)=>Math.max(value,deepSkyScore(h,night.moonIllumination),planetaryScore(h)),0)
   const averageCloud = hours.length ? Math.round(hours.reduce((sum,h)=>sum+h.cloud,0)/hours.length) : 100
+  const low = hours.length ? Math.round(hours.reduce((sum,h)=>sum+h.cloudLow,0)/hours.length) : 100
+  const mid = hours.length ? Math.round(hours.reduce((sum,h)=>sum+h.cloudMid,0)/hours.length) : 100
+  const high = hours.length ? Math.round(hours.reduce((sum,h)=>sum+h.cloudHigh,0)/hours.length) : 100
   const rain = hours.length ? Math.max(...hours.map(h=>h.precipitationProbability)) : 0
   return <button className={active?'active':''} onClick={onClick}>
-    <span>{dayLabel(night.date)}</span><WeatherGlyph cloud={averageCloud} rain={rain}/><b>{best}</b><small>{averageCloud}% nubes</small>
+    <span>{dayLabel(night.date)}</span><WeatherGlyph cloud={averageCloud} rain={rain}/><b>{best}</b><small className="cloud-layers"><i>B {low}</i><i>M {mid}</i><i>A {high}</i></small>
   </button>
 }
 function WeatherGlyph({cloud,rain}:{cloud:number,rain:number}) { return <span className="weather-glyph">{rain>35?'🌧️':cloud>65?'☁️':cloud>25?'🌤️':'✨'}</span> }
 function TrendChart({hours,sunset}:{hours:HourWeather[],sunset:Date}) {
+  const [view,setView] = useState<'clouds'|'conditions'>('clouds')
   if(hours.length < 2) return null
   const width=680, height=170, left=28, right=10, top=16, bottom=28
   const chartW=width-left-right, chartH=height-top-bottom
@@ -169,16 +173,25 @@ function TrendChart({hours,sunset}:{hours:HourWeather[],sunset:Date}) {
   const sunsetIndex=Math.max(0,hours.findIndex(h=>h.time>=sunset))
   return <section className="trend-card">
     <div className="trend-heading"><div><span>EVOLUCIÓN DEL CIELO</span><h2>De esta tarde al amanecer</h2></div><small>0–100%</small></div>
-    <div className="trend-legend"><i className="cloud-line"/>Nubes <i className="humidity-line"/>Humedad <i className="rain-line"/>Lluvia</div>
+    <div className="chart-tabs"><button className={view==='clouds'?'active':''} onClick={()=>setView('clouds')}>Capas de nubes</button><button className={view==='conditions'?'active':''} onClick={()=>setView('conditions')}>Humedad y lluvia</button></div>
+    {view==='clouds'
+      ? <div className="trend-legend"><i className="low-line"/>Bajas <i className="mid-line"/>Medias <i className="high-line"/>Altas</div>
+      : <div className="trend-legend"><i className="cloud-line"/>Nubosidad total <i className="humidity-line"/>Humedad <i className="rain-line"/>Lluvia</div>}
     <div className="chart-scroll">
       <svg className="trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Evolución horaria de nubosidad, humedad y precipitación">
         <rect x={x(sunsetIndex)} y={top} width={width-right-x(sunsetIndex)} height={chartH} rx="7" className="night-zone"/>
         {[0,25,50,75,100].map(v=><g key={v}><line x1={left} x2={width-right} y1={y(v)} y2={y(v)} className="grid-line"/><text x={left-6} y={y(v)+3} textAnchor="end" className="axis-label">{v}</text></g>)}
         <line x1={x(sunsetIndex)} x2={x(sunsetIndex)} y1={top} y2={top+chartH} className="sunset-line"/>
         <text x={Math.min(width-64,x(sunsetIndex)+5)} y={top+11} className="sunset-label">☾ anochecer</text>
-        <path d={path(hours.map(h=>h.cloud))} className="series-cloud"/>
-        <path d={path(hours.map(h=>h.humidity))} className="series-humidity"/>
-        <path d={path(hours.map(h=>h.precipitationProbability))} className="series-rain"/>
+        {view==='clouds' ? <>
+          <path d={path(hours.map(h=>h.cloudLow))} className="series-low"/>
+          <path d={path(hours.map(h=>h.cloudMid))} className="series-mid"/>
+          <path d={path(hours.map(h=>h.cloudHigh))} className="series-high"/>
+        </> : <>
+          <path d={path(hours.map(h=>h.cloud))} className="series-cloud"/>
+          <path d={path(hours.map(h=>h.humidity))} className="series-humidity"/>
+          <path d={path(hours.map(h=>h.precipitationProbability))} className="series-rain"/>
+        </>}
         {hours.map((h,i)=>i%3===0||i===hours.length-1?<text key={h.time.toISOString()} x={x(i)} y={height-8} textAnchor="middle" className="time-label">{time(h.time)}</text>:null)}
       </svg>
     </div>
