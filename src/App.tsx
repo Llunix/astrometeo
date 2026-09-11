@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CloudRain, Crosshair, Droplets, Gauge, LocateFixed, Moon, RefreshCw, Sparkles, Thermometer, Waves, Wind } from 'lucide-react'
-import { AstroForecast, deepSkyScore, fetchForecast, HourWeather, isNightHour, planetaryScore, scoreLabel } from './weather'
+import { CalendarDays, CloudRain, Crosshair, Droplets, Gauge, LocateFixed, MapPin, Moon, RefreshCw, Search, Sparkles, Thermometer, Waves, Wind, X } from 'lucide-react'
+import { AstroForecast, deepSkyScore, fetchForecast, HourWeather, hoursForNight, LocationResult, NightForecast, planetaryScore, scoreLabel, searchLocations } from './weather'
 
 const demoCoords = { latitude: 39.658, longitude: -0.425 }
 
@@ -9,46 +9,70 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(0)
+  const [selectedNight, setSelectedNight] = useState(0)
+  const [locationOpen, setLocationOpen] = useState(false)
+  const [locationQuery, setLocationQuery] = useState('')
+  const [locationResults, setLocationResults] = useState<LocationResult[]>([])
+  const [searching, setSearching] = useState(false)
 
   const load = () => {
     setLoading(true); setError('')
-    if (!navigator.geolocation) return getWeather(demoCoords.latitude, demoCoords.longitude, true)
+    if (!navigator.geolocation) return getWeather(demoCoords.latitude, demoCoords.longitude, 'Náquera', true)
     navigator.geolocation.getCurrentPosition(
-      p => getWeather(p.coords.latitude, p.coords.longitude),
-      () => getWeather(demoCoords.latitude, demoCoords.longitude, true),
+      p => getWeather(p.coords.latitude, p.coords.longitude, 'Mi ubicación'),
+      () => getWeather(demoCoords.latitude, demoCoords.longitude, 'Náquera', true),
       { enableHighAccuracy: true, timeout: 9000, maximumAge: 300000 }
     )
   }
-  const getWeather = async (lat:number, lon:number, fallback=false) => {
+  const getWeather = async (lat:number, lon:number, name?:string, fallback=false) => {
     try {
-      const result = await fetchForecast(lat,lon); setForecast(result)
+      const result = await fetchForecast(lat,lon,name); setForecast(result); setSelectedNight(0); setSelected(0)
       if (fallback) setError('GPS no disponible. Mostrando Náquera como ubicación provisional.')
     } catch(e) { setError(e instanceof Error ? e.message : 'Error inesperado') }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
 
-  const tonight = useMemo(() => forecast?.hours.filter(h => isNightHour(h, forecast)).slice(0,14) ?? [], [forecast])
+  useEffect(() => {
+    if (locationQuery.trim().length < 2) { setLocationResults([]); return }
+    const timer = window.setTimeout(async () => {
+      setSearching(true)
+      try { setLocationResults(await searchLocations(locationQuery)) }
+      catch { setLocationResults([]) }
+      finally { setSearching(false) }
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [locationQuery])
+
+  const chooseLocation = (place: LocationResult) => {
+    setLocationOpen(false); setLocationQuery(''); setLocationResults([]); setLoading(true); setError('')
+    getWeather(place.latitude, place.longitude, `${place.name}${place.detail ? ` · ${place.detail}` : ''}`)
+  }
+
+  const activeNight = forecast?.nights[selectedNight]
+  const tonight = useMemo(() => forecast && activeNight ? hoursForNight(forecast, activeNight).slice(0, 15) : [], [forecast, activeNight])
   const dayProgression = useMemo(() => {
-    if (!forecast) return []
-    const sunset = new Date(forecast.sunset)
+    if (!forecast || !activeNight) return []
+    const sunset = new Date(activeNight.sunset)
     const start = new Date(sunset)
     start.setHours(12, 0, 0, 0)
     const end = new Date(start)
     end.setDate(end.getDate() + 1)
     end.setHours(9, 0, 0, 0)
     return forecast.hours.filter(h => h.time >= start && h.time <= end)
-  }, [forecast])
+  }, [forecast, activeNight])
   const best = useMemo(() => tonight.reduce((winner, h, i) => {
-    const total = Math.max(deepSkyScore(h, forecast?.moonIllumination ?? 0), planetaryScore(h))
+    const total = Math.max(deepSkyScore(h, activeNight?.moonIllumination ?? 0), planetaryScore(h))
     return total > winner.score ? {index:i, score:total} : winner
-  }, {index:0,score:-1}), [tonight,forecast])
+  }, {index:0,score:-1}), [tonight,activeNight])
   useEffect(() => setSelected(best.index), [best.index])
 
   if (loading) return <Loading />
   if (!forecast || !tonight.length) return <Empty error={error} onRetry={load}/>
   const hour = tonight[selected] || tonight[0]
-  const deep = deepSkyScore(hour, forecast.moonIllumination)
+  const moonIllumination = activeNight?.moonIllumination ?? forecast.moonIllumination
+  const moonPhaseName = activeNight?.moonPhaseName ?? forecast.moonPhaseName
+  const deep = deepSkyScore(hour, moonIllumination)
   const planet = planetaryScore(hour)
   const overall = Math.max(deep, planet)
   const status = scoreLabel(overall)
@@ -57,26 +81,32 @@ export default function App() {
   return <main>
     <header>
       <div className="brand"><div className="brand-mark"><Moon size={20}/></div><div><b>AstroMeteo</b><span>para astrofotografía</span></div></div>
-      <button className="icon-button" onClick={load} aria-label="Actualizar"><RefreshCw size={19}/></button>
+      <button className="icon-button" onClick={()=>getWeather(forecast.latitude,forecast.longitude,forecast.location)} aria-label="Actualizar"><RefreshCw size={19}/></button>
     </header>
 
     <section className="location-row">
-      <LocateFixed size={16}/><span>{forecast.location}</span><small>{forecast.elevation} m</small>
+      <MapPin size={16}/><button className="location-button" onClick={()=>setLocationOpen(true)}>{forecast.location}</button><small>{forecast.elevation} m</small>
     </section>
+    {locationOpen && <LocationPicker query={locationQuery} setQuery={setLocationQuery} results={locationResults} searching={searching} onChoose={chooseLocation} onGps={()=>{setLocationOpen(false);load()}} onClose={()=>setLocationOpen(false)}/>} 
     {error && <div className="notice">{error}</div>}
 
-    <section className={`verdict ${status.color}`}>
-      <div className="eyebrow">ESTA NOCHE · MEJOR MOMENTO {time(hour.time)}</div>
-      <div className="verdict-main"><div><h1>{status.label}</h1><p>La mejor opción es <strong>{mode.toLowerCase()}</strong></p></div><ScoreRing value={overall}/></div>
-      <div className="reason">{verdictText(hour, deep, planet, forecast.moonIllumination)}</div>
+    <div className="section-title forecast-title"><span><CalendarDays size={15}/> Próximas noches</span><small>Previsión de 7 días</small></div>
+    <section className="day-strip">
+      {forecast.nights.map((night,i)=><NightButton key={night.date} night={night} hours={hoursForNight(forecast,night)} active={selectedNight===i} onClick={()=>setSelectedNight(i)}/>) }
     </section>
 
-    <TrendChart hours={dayProgression} sunset={new Date(forecast.sunset)} />
+    <section className={`verdict ${status.color}`}>
+      <div className="eyebrow">{selectedNight===0?'ESTA NOCHE':dayLabel(activeNight!.date).toUpperCase()} · MEJOR MOMENTO {time(hour.time)}</div>
+      <div className="verdict-main"><div><h1>{status.label}</h1><p>La mejor opción es <strong>{mode.toLowerCase()}</strong></p></div><ScoreRing value={overall}/></div>
+      <div className="reason">{verdictText(hour, deep, planet, moonIllumination)}</div>
+    </section>
+
+    <TrendChart hours={dayProgression} sunset={new Date(activeNight!.sunset)} />
 
     <div className="section-title"><span>Pronóstico por horas</span><small>Desliza para ver la noche</small></div>
     <section className="hour-strip">
       {tonight.map((h,i) => {
-        const score = Math.max(deepSkyScore(h,forecast.moonIllumination),planetaryScore(h))
+        const score = Math.max(deepSkyScore(h,moonIllumination),planetaryScore(h))
         return <button key={h.time.toISOString()} className={selected===i?'active':''} onClick={()=>setSelected(i)}>
           <b>{time(h.time)}</b><WeatherGlyph cloud={h.cloud} rain={h.precipitationProbability}/><span className={`dot ${scoreLabel(score).color}`}/><small>{h.cloud}%</small>
         </button>
@@ -85,7 +115,7 @@ export default function App() {
 
     <section className="mode-grid">
       <ModeCard icon={<Crosshair/>} title="Planetaria" score={planet} detail={seeingText(hour)} />
-      <ModeCard icon={<Sparkles/>} title="Cielo profundo" score={deep} detail={`${hour.cloud}% nubes · Luna ${forecast.moonIllumination}%`} />
+      <ModeCard icon={<Sparkles/>} title="Cielo profundo" score={deep} detail={`${hour.cloud}% nubes · Luna ${moonIllumination}%`} />
     </section>
 
     <div className="section-title"><span>Condiciones a las {time(hour.time)}</span></div>
@@ -96,7 +126,7 @@ export default function App() {
       <Metric icon={<Wind/>} label="Jet stream" value={`${Math.round(hour.jetStream)} km/h`} sub={hour.jetStream < 50 ? 'Favorable' : hour.jetStream < 85 ? 'Moderado' : 'Desfavorable'} level={Math.max(0,100-hour.jetStream)}/>
       <Metric icon={<Thermometer/>} label="Temperatura" value={`${hour.temperature}°`} sub={`Viento ${hour.wind} · rachas ${hour.gust} km/h`} level={50}/>
       <Metric icon={<CloudRain/>} label="Precipitación" value={`${hour.precipitationProbability}%`} sub={`${hour.precipitation} mm previstos`} level={100-hour.precipitationProbability}/>
-      <Metric icon={<Moon/>} label="Luna" value={`${forecast.moonIllumination}%`} sub={forecast.moonPhaseName} level={100-forecast.moonIllumination}/>
+      <Metric icon={<Moon/>} label="Luna" value={`${moonIllumination}%`} sub={moonPhaseName} level={100-moonIllumination}/>
       <Metric icon={<Gauge/>} label="Visibilidad" value={`${Math.round(hour.visibility)} km`} sub="Visibilidad meteorológica" level={Math.min(100,hour.visibility*2)}/>
     </section>
     <footer>Datos meteorológicos: Open-Meteo · Seeing: 7Timer<br/>Las previsiones son orientativas y pueden variar localmente.</footer>
@@ -104,6 +134,30 @@ export default function App() {
 }
 
 function time(d:Date){ return d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}) }
+function dayLabel(date:string){
+  const value = new Date(`${date}T12:00:00`)
+  return value.toLocaleDateString('es-ES',{weekday:'short',day:'numeric'}).replace('.','')
+}
+function LocationPicker({query,setQuery,results,searching,onChoose,onGps,onClose}:{query:string,setQuery:(value:string)=>void,results:LocationResult[],searching:boolean,onChoose:(place:LocationResult)=>void,onGps:()=>void,onClose:()=>void}) {
+  return <div className="location-panel">
+    <div className="location-panel-head"><b>Cambiar ubicación</b><button onClick={onClose} aria-label="Cerrar"><X size={18}/></button></div>
+    <button className="gps-button" onClick={onGps}><LocateFixed size={17}/> Usar mi ubicación GPS</button>
+    <label className="search-box"><Search size={17}/><input autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar ciudad o código postal"/></label>
+    <div className="location-results">
+      {searching && <small>Buscando…</small>}
+      {!searching && query.length>=2 && !results.length && <small>No hay resultados</small>}
+      {results.map(place=><button key={place.id} onClick={()=>onChoose(place)}><MapPin size={16}/><span><b>{place.name}</b><small>{place.detail}</small></span></button>)}
+    </div>
+  </div>
+}
+function NightButton({night,hours,active,onClick}:{night:NightForecast,hours:HourWeather[],active:boolean,onClick:()=>void}) {
+  const best = hours.reduce((value,h)=>Math.max(value,deepSkyScore(h,night.moonIllumination),planetaryScore(h)),0)
+  const averageCloud = hours.length ? Math.round(hours.reduce((sum,h)=>sum+h.cloud,0)/hours.length) : 100
+  const rain = hours.length ? Math.max(...hours.map(h=>h.precipitationProbability)) : 0
+  return <button className={active?'active':''} onClick={onClick}>
+    <span>{dayLabel(night.date)}</span><WeatherGlyph cloud={averageCloud} rain={rain}/><b>{best}</b><small>{averageCloud}% nubes</small>
+  </button>
+}
 function WeatherGlyph({cloud,rain}:{cloud:number,rain:number}) { return <span className="weather-glyph">{rain>35?'🌧️':cloud>65?'☁️':cloud>25?'🌤️':'✨'}</span> }
 function TrendChart({hours,sunset}:{hours:HourWeather[],sunset:Date}) {
   if(hours.length < 2) return null
