@@ -29,6 +29,16 @@ export default function App() {
   useEffect(() => { load() }, [])
 
   const tonight = useMemo(() => forecast?.hours.filter(h => isNightHour(h, forecast)).slice(0,14) ?? [], [forecast])
+  const dayProgression = useMemo(() => {
+    if (!forecast) return []
+    const sunset = new Date(forecast.sunset)
+    const start = new Date(sunset)
+    start.setHours(12, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 1)
+    end.setHours(9, 0, 0, 0)
+    return forecast.hours.filter(h => h.time >= start && h.time <= end)
+  }, [forecast])
   const best = useMemo(() => tonight.reduce((winner, h, i) => {
     const total = Math.max(deepSkyScore(h, forecast?.moonIllumination ?? 0), planetaryScore(h))
     return total > winner.score ? {index:i, score:total} : winner
@@ -60,6 +70,8 @@ export default function App() {
       <div className="verdict-main"><div><h1>{status.label}</h1><p>La mejor opción es <strong>{mode.toLowerCase()}</strong></p></div><ScoreRing value={overall}/></div>
       <div className="reason">{verdictText(hour, deep, planet, forecast.moonIllumination)}</div>
     </section>
+
+    <TrendChart hours={dayProgression} sunset={new Date(forecast.sunset)} />
 
     <div className="section-title"><span>Pronóstico por horas</span><small>Desliza para ver la noche</small></div>
     <section className="hour-strip">
@@ -93,6 +105,31 @@ export default function App() {
 
 function time(d:Date){ return d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}) }
 function WeatherGlyph({cloud,rain}:{cloud:number,rain:number}) { return <span className="weather-glyph">{rain>35?'🌧️':cloud>65?'☁️':cloud>25?'🌤️':'✨'}</span> }
+function TrendChart({hours,sunset}:{hours:HourWeather[],sunset:Date}) {
+  if(hours.length < 2) return null
+  const width=680, height=170, left=28, right=10, top=16, bottom=28
+  const chartW=width-left-right, chartH=height-top-bottom
+  const x=(i:number)=>left+i/(hours.length-1)*chartW
+  const y=(v:number)=>top+(100-Math.max(0,Math.min(100,v)))/100*chartH
+  const path=(values:number[])=>values.map((v,i)=>`${i?'L':'M'} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ')
+  const sunsetIndex=Math.max(0,hours.findIndex(h=>h.time>=sunset))
+  return <section className="trend-card">
+    <div className="trend-heading"><div><span>EVOLUCIÓN DEL CIELO</span><h2>De esta tarde al amanecer</h2></div><small>0–100%</small></div>
+    <div className="trend-legend"><i className="cloud-line"/>Nubes <i className="humidity-line"/>Humedad <i className="rain-line"/>Lluvia</div>
+    <div className="chart-scroll">
+      <svg className="trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Evolución horaria de nubosidad, humedad y precipitación">
+        <rect x={x(sunsetIndex)} y={top} width={width-right-x(sunsetIndex)} height={chartH} rx="7" className="night-zone"/>
+        {[0,25,50,75,100].map(v=><g key={v}><line x1={left} x2={width-right} y1={y(v)} y2={y(v)} className="grid-line"/><text x={left-6} y={y(v)+3} textAnchor="end" className="axis-label">{v}</text></g>)}
+        <line x1={x(sunsetIndex)} x2={x(sunsetIndex)} y1={top} y2={top+chartH} className="sunset-line"/>
+        <text x={Math.min(width-64,x(sunsetIndex)+5)} y={top+11} className="sunset-label">☾ anochecer</text>
+        <path d={path(hours.map(h=>h.cloud))} className="series-cloud"/>
+        <path d={path(hours.map(h=>h.humidity))} className="series-humidity"/>
+        <path d={path(hours.map(h=>h.precipitationProbability))} className="series-rain"/>
+        {hours.map((h,i)=>i%3===0||i===hours.length-1?<text key={h.time.toISOString()} x={x(i)} y={height-8} textAnchor="middle" className="time-label">{time(h.time)}</text>:null)}
+      </svg>
+    </div>
+  </section>
+}
 function ScoreRing({value}:{value:number}) { return <div className="score-ring" style={{'--score':`${value*3.6}deg`} as React.CSSProperties}><div><b>{value}</b><small>/100</small></div></div> }
 function ModeCard({icon,title,score,detail}:{icon:React.ReactNode,title:string,score:number,detail:string}) { const s=scoreLabel(score); return <article className="mode-card"><div className="mode-head"><span>{icon}</span><small className={s.color}>{s.label}</small></div><h3>{title}</h3><div className="mode-score"><b>{score}</b><span>/100</span></div><p>{detail}</p></article> }
 function Metric({icon,label,value,sub,level}:{icon:React.ReactNode,label:string,value:string,sub:string,level:number}) { return <article className="metric"><div className="metric-icon">{icon}</div><div className="metric-copy"><span>{label}</span><b>{value}</b><small>{sub}</small><div className="bar"><i style={{width:`${Math.max(4,Math.min(100,level))}%`}}/></div></div></article> }
