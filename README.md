@@ -20,6 +20,8 @@ npm run dev
 
 ## Web y GitHub Pages
 
+Este repositorio y GitHub Pages contienen solo la previsión meteorológica pública. El gestor privado de sesiones, los logs ASIAIR y la integración con Supabase se mantienen en un proyecto separado y no se incluyen aquí.
+
 El workflow `.github/workflows/deploy-pages.yml` compila y publica cada push a `main`. En GitHub activa **Settings → Pages → Source → GitHub Actions**.
 
 ```bash
